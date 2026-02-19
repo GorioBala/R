@@ -1,0 +1,50 @@
+name: Sincronizzazione Multi-Repo
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  distribuisci:
+    runs-on: ubuntu-latest
+    steps:
+        - name: Scarica il codice
+          uses: actions/checkout@v4
+          with:
+            fetch-depth: 0
+            persist-credentials: false # <--- FONDAMENTALE: impedisce a Git di usare il token di default
+
+        - name: Prepara e Invia a R1
+          run: |
+            # 1. Configura l'identità
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+            # 2. Crea un branch temporaneo per il deploy
+            # Questo branch conterrà tutto tranne la cartella .github
+            git checkout -b deploy-branch
+
+            # 3. Rimuovi la cartella workflow dall'indice (non dalla storia)
+            # L'opzione --cached la rimuove dal prossimo commit senza cancellare i file fisici
+            git rm -r --cached .github/workflows || true
+            git commit -m "Release: sync to R1"
+
+            # 4. Aggiungi il remote
+            git remote add destinazione "https://x-access-token:${{ secrets.TOKEN_CLIENTE_A }}@github.com/GorioBala/r1.git"
+
+            # 5. FETCH per vedere se R1 è avanti
+            git fetch destinazione main
+
+            # 6. TENTATIVO DI REBASE (Mantiene la storia pulita)
+            # Il rebase prova a mettere il tuo nuovo commit "sopra" quelli di R1
+            if git rebase destinazione/main; then
+              echo "Rebase riuscito, invio i dati..."
+              git push destinazione deploy-branch:main
+            else
+              echo "CONFLITTO RILEVATO: Il rebase è fallito."
+              echo "I file su R1 sono diversi da quelli locali."
+              echo "Eseguito un push forzato"
+              git push destinazione/main --force
+              #exit 1 # Blocca tutto, risolvi in locale
+            fi
